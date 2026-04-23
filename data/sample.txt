@@ -1,0 +1,10 @@
+Vector databases store high-dimensional numeric representations of data called embeddings.
+An embedding maps text, images, or other inputs into a fixed-length vector space.
+Similar meanings tend to produce vectors that point in similar directions in that space.
+
+Cosine similarity measures the angle between two vectors, ignoring their magnitude to some extent.
+It is computed as the dot product divided by the product of the vector lengths.
+Search systems embed the query and compare it to stored vectors to find nearest neighbors.
+
+This demo keeps chunking, embedding, storage, and scoring explicit for learning.
+You can change chunk size and overlap to see how retrieval behavior changes.
