@@ -29,11 +29,7 @@ export function registerRoutes(app) {
     csvFileUploadMiddleware,
     handleIngestCsvUpload
   );
-  app.post(
-    "/ingest-csv/upload/",
-    csvFileUploadMiddleware,
-    handleIngestCsvUpload
-  );
+ 
 
   app.use(express.json({ limit: "1mb" }));
 

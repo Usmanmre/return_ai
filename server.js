@@ -3,6 +3,33 @@ import { config } from "./src/utils/config.js";
 import { registerRoutes } from "./src/routes/index.js";
 
 const app = express();
+
+app.use((req, res, next) => {
+  const origin = req.headers.origin;
+  const allowedOrigins = new Set([
+    "http://localhost:5173",
+    "http://127.0.0.1:3000",
+  ]);
+
+  if (origin && allowedOrigins.has(origin)) {
+    res.header("Access-Control-Allow-Origin", origin);
+    res.header("Vary", "Origin");
+    res.header("Access-Control-Allow-Credentials", "true");
+  }
+
+  res.header("Access-Control-Allow-Methods", "GET,POST,OPTIONS");
+  res.header(
+    "Access-Control-Allow-Headers",
+    req.headers["access-control-request-headers"] || "Content-Type, Authorization"
+  );
+
+  if (req.method === "OPTIONS") {
+    return res.sendStatus(204);
+  }
+
+  next();
+});
+
 registerRoutes(app);
 
 app.listen(config.port, () => {
