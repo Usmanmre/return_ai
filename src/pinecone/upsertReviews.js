@@ -8,9 +8,7 @@ import { getPineconeIndex } from "./client.js";
 export async function embedAndUpsertReviews(vectorRecords) {
   const index = getPineconeIndex();
   const batchSize = config.pineconeUpsertBatchSize;
-  const texts = vectorRecords.map((r) => r.text);
   let totalUpserted = 0;
-
   for (let offset = 0; offset < vectorRecords.length; offset += batchSize) {
     const slice = vectorRecords.slice(offset, offset + batchSize);
     const sliceTexts = slice.map((r) => r.text);

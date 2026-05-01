@@ -107,6 +107,7 @@ export function rowsToVectorRecords(
     textColumn,
     summaryColumn,
     ratingColumn,
+    returnReasonColumn,
     maxRows,
     maxTextChars = config.maxMetadataTextChars,
   }
@@ -124,6 +125,14 @@ export function rowsToVectorRecords(
         "score",
         "star_rating",
       ]);
+  const returnReasonKey = returnReasonColumn
+    ? pickColumn(headers, returnReasonColumn, [])
+    : pickColumn(headers, null, [
+        "return_reason",
+        "returnReason",
+        "return reason",
+        "reason_for_return",
+      ]);
 
   const slice = maxRows ? records.slice(0, maxRows) : records;
   const out = [];
@@ -138,6 +147,9 @@ export function rowsToVectorRecords(
       ratingKey && row[ratingKey] !== undefined && row[ratingKey] !== ""
         ? Number(row[ratingKey])
         : undefined;
+    const returnReason = returnReasonKey
+      ? String(row[returnReasonKey] || "").trim()
+      : "";
 
     const meta = {
       text: truncate(text, maxTextChars),
@@ -146,6 +158,7 @@ export function rowsToVectorRecords(
     };
     if (summary) meta.summary = truncate(summary, 2000);
     if (Number.isFinite(rating)) meta.rating = rating;
+    if (returnReason) meta.return_reason = truncate(returnReason, 2000);
 
     const asinKey = pickColumn(Object.keys(row), null, ["asin", "productId", "product_id"]);
     if (asinKey && row[asinKey]) meta.asin = String(row[asinKey]).trim();

@@ -1,4 +1,5 @@
 import multer from "multer";
+import { ChatOpenAI } from "@langchain/openai";
 import { config } from "../utils/config.js";
 import { loadAndChunk } from "../ingest/loadAndChunk.js";
 import {
@@ -49,6 +50,7 @@ export async function handleIngestCsvUpload(req, res) {
         textColumn: body.textColumn,
         summaryColumn: body.summaryColumn,
         ratingColumn: body.ratingColumn,
+        returnReasonColumn: body.returnReasonColumn,
         maxRows: body.maxRows != null ? Number(body.maxRows) : undefined,
       });
 
@@ -212,6 +214,7 @@ export async function handleIngestCsvJson(req, res) {
         textColumn: body.textColumn,
         summaryColumn: body.summaryColumn,
         ratingColumn: body.ratingColumn,
+        returnReasonColumn: body.returnReasonColumn,
         maxRows: body.maxRows != null ? Number(body.maxRows) : undefined,
       });
 
@@ -263,6 +266,60 @@ function pickRagUserText(body) {
   return "";
 }
 
+async function classifyShoeReviewIntent(message) {
+  const llm = new ChatOpenAI({
+    openAIApiKey: config.openaiApiKey,
+    modelName: config.openaiChatModel,
+    temperature: 0,
+  });
+
+  const response = await llm.invoke([
+    [
+      "system",
+      `Classify whether the user's message is in-domain for an e-commerce shoe review search RAG system.
+
+In-domain examples:
+- Searching, summarizing, comparing, or analyzing shoe product reviews.
+- Questions about shoe ratings, comfort, sizing, fit, returns, return reasons, quality, durability, delivery, or customer sentiment.
+- Requests to classify or explain a shoe-related review.
+
+Out-of-domain examples:
+- Anything unrelated to e-commerce shoe reviews.
+- General trivia, coding, math, medical/legal/financial advice, news, weather, politics, or requests about non-shoe products.
+
+Return only JSON with this exact shape:
+{"inDomain":true,"intent":"shoe_review_search","reason":"short reason"}
+or:
+{"inDomain":false,"intent":"out_of_domain","reason":"short reason"}`,
+    ],
+    ["human", message],
+  ]);
+
+  const content =
+    typeof response.content === "string"
+      ? response.content
+      : JSON.stringify(response.content);
+
+  try {
+    const parsed = JSON.parse(content.trim());
+    return {
+      inDomain: parsed.inDomain === true,
+      intent:
+        typeof parsed.intent === "string" ? parsed.intent : "out_of_domain",
+      reason:
+        typeof parsed.reason === "string"
+          ? parsed.reason
+          : "Unable to classify intent.",
+    };
+  } catch {
+    return {
+      inDomain: false,
+      intent: "out_of_domain",
+      reason: "Intent classifier returned an invalid response.",
+    };
+  }
+}
+
 export async function handleRag(req, res) {
   try {
     const body = req.body && typeof req.body === "object" ? req.body : {};
@@ -294,13 +351,26 @@ export async function handleRag(req, res) {
       });
     }
 
+    const intent = await classifyShoeReviewIntent(message.trim());
+    console.log('intent', intent);
+    if (!intent.inDomain) {
+      return res.json({
+        ok: true,
+        discarded: true,
+        intent,
+        answer:
+          "I can only help with e-commerce shoe review search and analysis.",
+        sources: [],
+      });
+    }
+
     const { answer, sources } = await runAmazonReviewRag({
       userMessage: message.trim(),
       topK: k,
       systemPrompt,
     });
 
-    res.json({ ok: true, k, answer, sources });
+    res.json({ ok: true, k, intent, answer, sources });
   } catch (err) {
     console.error("[rag] error:", err);
     res.status(500).json({

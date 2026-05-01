@@ -3,7 +3,7 @@ import { embedText } from "../embeddings/generate.js";
 import { config } from "../utils/config.js";
 import { getPineconeIndex } from "../pinecone/client.js";
 
-const DEFAULT_SYSTEM = `You are an analyst for Amazon-style product reviews.
+const DEFAULT_SYSTEM = `You are an analyst for E-commerce store product reviews.
 You will receive:
 1) CONTEXT: snippets of historical reviews retrieved by semantic similarity.
 2) USER MESSAGE: a question, or a new review to classify / compare / explain.
@@ -39,6 +39,7 @@ export async function runAmazonReviewRag({
 
   const matches = queryResponse.matches || [];
   const blocks = matches
+    .filter((m) => (m.score ?? 0) >= 0.3)
     .map((m, i) => {
       const text = m.metadata?.text ? String(m.metadata.text) : "";
       const rating = m.metadata?.rating;
@@ -47,6 +48,7 @@ export async function runAmazonReviewRag({
       return `${head}\n${text}`;
     })
     .filter((b) => b.length > 0);
+  console.log('blocks', blocks);
 
   const contextBlock =
     blocks.length > 0
@@ -60,6 +62,9 @@ export async function runAmazonReviewRag({
     modelName: config.openaiChatModel,
     temperature: 0.2,
   });
+
+  console.log('contextBlock', contextBlock);
+  console.log('userMessage', trimmed);
 
   const response = await llm.invoke([
     ["system", system],
