@@ -48,7 +48,6 @@ export async function runAmazonReviewRag({
       return `${head}\n${text}`;
     })
     .filter((b) => b.length > 0);
-  console.log('blocks', blocks);
 
   const contextBlock =
     blocks.length > 0
@@ -63,8 +62,6 @@ export async function runAmazonReviewRag({
     temperature: 0.2,
   });
 
-  console.log('contextBlock', contextBlock);
-  console.log('userMessage', trimmed);
 
   const response = await llm.invoke([
     ["system", system],
