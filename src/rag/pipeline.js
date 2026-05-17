@@ -2,6 +2,15 @@ import { ChatOpenAI } from "@langchain/openai";
 import { embedText } from "../embeddings/generate.js";
 import { config } from "../utils/config.js";
 import { getPineconeIndex } from "../pinecone/client.js";
+import { Client } from "@elastic/elasticsearch";
+
+// Use the client version that matches the server where possible.
+// If you run Elasticsearch 8.x, prefer installing @elastic/elasticsearch v8.
+// For demo setups that already have a compatible client/server pair, the
+// default client headers will be correct and no manual header override is needed.
+const es = new Client({
+  node: process.env.ELASTIC_URL || "http://localhost:9200",
+});
 
 const DEFAULT_SYSTEM = `You are an analyst for E-commerce store product reviews.
 You will receive:
@@ -30,14 +39,20 @@ export async function runAmazonReviewRag({
 
   const queryVector = await embedText(trimmed);
   const index = getPineconeIndex();
-
-  const queryResponse = await index.query({
+// createReviewsIndex() 
+ const [vectorResponse, bm25Results] = await Promise.all([
+  index.query({
     vector: queryVector,
     topK,
     includeMetadata: true,
-  });
+  }),
+  bm25Search(trimmed, topK)
+]);
 
-  const matches = queryResponse.matches || [];
+const vectorMatches = vectorResponse.matches || [];
+const bm25Matches = bm25Results || [];
+const matches = mergeResults(vectorMatches, bm25Matches);
+
   const blocks = matches
     .filter((m) => (m.score ?? 0) >= 0.3)
     .map((m, i) => {
@@ -87,4 +102,89 @@ export async function runAmazonReviewRag({
   }));
 
   return { answer, sources };
+}
+
+async function bm25Search(query, topK) {
+  console.log('[rag] checking for existing "reviews" index in Elasticsearch...');
+  try {
+    const res = await es.search({
+      index: "reviews",
+      size: topK,
+      query: {
+        match: {
+          text: query,
+        },
+      },
+    });
+
+    return (res.hits.hits || []).map((h) => ({
+      id: h._id,
+      score: h._score,
+      text: h._source.text,
+      rating: h._source.rating,
+      asin: h._source.asin,
+    }));
+  } catch (err) {
+    // If the index doesn't exist, return an empty result list and log a helpful message.
+    const errType = err?.meta?.body?.error?.type;
+    if (errType === "index_not_found_exception") {
+      console.warn(
+        '[rag] Elasticsearch index "reviews" not found — BM25 disabled. Create the index to enable BM25.'
+      );
+      return [];
+    }
+    throw err;
+  }
+}
+
+/**
+ * Create a minimal `reviews` index mapping (text + optional numeric fields).
+ * Call this once to create the index if you don't want to use curl / Kibana.
+ */
+export async function createReviewsIndex() {
+  console.log('[rag] checking for existing "reviews" index in Elasticsearch...');
+  const exists = await es.indices.exists({ index: "reviews" });
+  if (exists.body === true) {
+    console.log('[rag] reviews index already exists');
+    return { created: false };
+  }
+
+  const body = {
+    mappings: {
+      properties: {
+        text: { type: "text" },
+        rating: { type: "float" },
+        asin: { type: "keyword" },
+      },
+    },
+  };
+
+  const res = await es.indices.create({ index: "reviews", body });
+  return res.body || res;
+}
+
+function rrf(rank, k = 6) {
+  return 1 / (k + rank);
+}
+
+function mergeResults(vectorMatches, bm25Matches) {
+  const map = new Map();
+
+  vectorMatches.forEach((m, i) => {
+    map.set(m.id, (map.get(m.id) || 0) + rrf(i));
+  });
+
+  bm25Matches.forEach((m, i) => {
+    map.set(m.id, (map.get(m.id) || 0) + rrf(i));
+  });
+
+  return [...map.entries()]
+    .sort((a, b) => b[1] - a[1])
+    .map(([id]) => {
+      return (
+        vectorMatches.find((v) => v.id === id) ||
+        bm25Matches.find((b) => b.id === id)
+      );
+    })
+    .filter(Boolean);
 }
