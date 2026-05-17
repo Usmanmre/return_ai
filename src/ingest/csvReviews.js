@@ -4,6 +4,7 @@ import { parse } from "csv-parse/sync";
 import { fileURLToPath } from "url";
 import { createHash } from "crypto";
 import { config } from "../utils/config.js";
+import { chunkText } from "./loadAndChunk.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const PROJECT_ROOT = path.resolve(__dirname, "../..");
@@ -163,11 +164,37 @@ export function rowsToVectorRecords(
     const asinKey = pickColumn(Object.keys(row), null, ["asin", "productId", "product_id"]);
     if (asinKey && row[asinKey]) meta.asin = String(row[asinKey]).trim();
 
-    out.push({
-      id: stableId(i, text),
-      text,
-      metadata: meta,
-    });
+    // If the review text is long, split it into overlapping chunks using
+    // the same chunkSize/chunkOverlap used by local ingest (config.chunkSize).
+    // Each chunk becomes its own vector record with chunkIndex metadata. Short
+    // texts remain as a single record.
+    const threshold = Number(config.chunkSize) || 400;
+    if (text.length > threshold) {
+      const chunks = chunkText(text, {
+        chunkSize: threshold,
+        chunkOverlap: Number(config.chunkOverlap) || 50,
+      });
+      const chunkCount = chunks.length || 0;
+      for (let ci = 0; ci < chunkCount; ci++) {
+        const chunk = chunks[ci];
+        const chunkMeta = {
+          ...meta,
+          chunkIndex: ci,
+          chunkCount,
+        };
+        out.push({
+          id: stableId(i, chunk + `-c${ci}`),
+          text: chunk,
+          metadata: chunkMeta,
+        });
+      }
+    } else {
+      out.push({
+        id: stableId(i, text),
+        text,
+        metadata: meta,
+      });
+    }
   }
 
   return { textKey, records: out, skippedEmpty: slice.length - out.length };

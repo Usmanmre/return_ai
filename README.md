@@ -92,6 +92,8 @@ reviews.csv  (rows: reviewText, overall, summary, asin, …)
 
 Each **CSV row** becomes **one embedding** (the full review text for that row). Very long reviews are truncated in **metadata** (`MAX_METADATA_TEXT_CHARS`) to stay within Pinecone metadata limits; adjust env or split long reviews in preprocessing if you need every token.
 
+Note: CSV ingest currently embeds and upserts directly to Pinecone only. The project can optionally fuse BM25 search from Elasticsearch with Pinecone results in the RAG pipeline. To enable BM25 you must run an ES node and create a `reviews` index (see `src/rag/pipeline.js` → `createReviewsIndex()`), or implement a small sync that indexes CSV rows into ES during ingest.
+
 ---
 
 ## Tech stack
@@ -107,6 +109,7 @@ Each **CSV row** becomes **one embedding** (the full review text for that row). 
 | Hosted vector DB | **@pinecone-database/pinecone** (upsert / query) |
 | CSV | **csv-parse** |
 | Upload | **multer** (memory storage) |
+| Search (BM25) | **Elasticsearch 8.x** (optional, used for BM25 fusion in RAG) |
 
 ---
 
@@ -122,6 +125,19 @@ npm run dev
 ```
 
 Default base URL: `http://localhost:3000` (override with `PORT`).
+
+Optional: Elasticsearch (BM25 fusion for `/rag`)
+
+If you want the BM25 text search fused with Pinecone vectors during RAG, run an Elasticsearch 8.x node locally. A simple Docker example:
+
+```bash
+docker run -p 9200:9200 -p 9300:9300 \
+     -e "discovery.type=single-node" \
+     -e "xpack.security.enabled=false" \
+     docker.elastic.co/elasticsearch/elasticsearch:8.12.0
+```
+
+The app expects an index named `reviews`. If the index is missing, the RAG pipeline will continue using Pinecone-only retrieval and log a warning. See `src/rag/pipeline.js` for a helper `createReviewsIndex()` that will create a minimal `reviews` mapping for you.
 
 | Script | Command |
 |--------|---------|
@@ -141,7 +157,7 @@ Default base URL: `http://localhost:3000` (override with `PORT`).
 | `PINECONE_API_KEY` | For CSV/RAG | — | Pinecone API key |
 | `PINECONE_INDEX_NAME` | For CSV/RAG | — | Target index name |
 | `PINECONE_HOST` | No | — | Index host URL if shown in Pinecone console |
-| `PINECONE_UPSERT_BATCH` | No | `100` | Vectors per upsert batch |
+| `PINECONE_UPSERT_BATCH` | No | `100` | Vectors per upsert batch (env name: PINECONE_UPSERT_BATCH) |
 | `MAX_METADATA_TEXT_CHARS` | No | `32000` | Max stored review text per vector (metadata) |
 | `RAG_DEFAULT_TOP_K` | No | `8` | Default `k` for Pinecone query in `/rag` |
 | `PORT` | No | `3000` | HTTP port |
@@ -237,6 +253,10 @@ Embeds the query, scores every stored vector with cosine similarity, returns the
 **Response:** `{ ok, k, answer, sources }` — `sources` lists Pinecone match ids, scores, and short text previews.
 
 **Flow:** `src/rag/pipeline.js` embeds `message`, runs `index.query`, stitches retrieved `metadata.text` into the user prompt, calls `ChatOpenAI`.
+
+Notes on BM25 / Elasticsearch:
+- If an Elasticsearch `reviews` index is available, `runAmazonReviewRag` will fuse vector matches from Pinecone with BM25 hits from ES (reciprocal-rank fusion).
+- If the `reviews` index is missing, the pipeline logs a warning and continues using Pinecone-only retrieval. Create the index with `createReviewsIndex()` (in `src/rag/pipeline.js`) or via curl/Kibana to enable BM25.
 
 ---
 
